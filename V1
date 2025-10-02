@@ -1,0 +1,95 @@
+{
+  "appName": "Teacher Deployment Hub",
+  "version": "1.0.0",
+  "description": "A JSON representation of the logic and structure for the teacher deployment dashboard.",
+  "configuration": {
+    "startTime": "08:00",
+    "endTime": "18:00",
+    "timeIntervalMinutes": 35,
+    "assumedExcelHeaders": [
+      "Teacher Name",
+      "Date",
+      "Start Time",
+      "End Time",
+      "Location/Duty"
+    ]
+  },
+  "uiStructure": {
+    "header": {
+      "title": "Teacher Deployment Hub",
+      "subtitle": "Upload the daily deployment sheet to view schedules."
+    },
+    "sections": [
+      {
+        "id": "upload-section",
+        "title": "1. Upload Deployment File",
+        "components": [
+          {
+            "type": "file-input",
+            "id": "file-upload",
+            "label": "Drop your Excel file here, or browse"
+          }
+        ]
+      },
+      {
+        "id": "view-section",
+        "title": "2. View Schedules",
+        "components": [
+          {
+            "type": "text-input",
+            "id": "teacher-name",
+            "placeholder": "Type your full name here..."
+          },
+          {
+            "type": "button",
+            "id": "show-personal-btn",
+            "label": "My Schedule"
+          },
+          {
+            "type": "button",
+            "id": "show-master-btn",
+            "label": "View Master Schedule for All Teachers"
+          }
+        ]
+      },
+      {
+        "id": "results-container",
+        "title": "Schedule Display",
+        "description": "This area is dynamically populated with either the personal or master schedule table."
+      }
+    ]
+  },
+  "logic": {
+    "processDeploymentData": "function processDeploymentData(rawData) { let deploymentData = new Map(); generateTimeSlots(); rawData.forEach(row => { const teacherName = row['Teacher Name']?.trim(); const duty = row['Location/Duty']?.trim(); let startTime = row['Start Time']; let endTime = row['End Time']; if (!teacherName || !duty || !startTime || !endTime) return; startTime = normalizeTime(startTime); endTime = normalizeTime(endTime); if (!deploymentData.has(teacherName)) { deploymentData.set(teacherName, []); } deploymentData.get(teacherName).push({ startTime, endTime, duty }); }); return deploymentData; }",
+    "normalizeTime": "function normalizeTime(time) { if (time instanceof Date) { return time.toTimeString().slice(0, 5); } if (typeof time === 'number') { const date = new Date(Date.UTC(1899, 11, 30 + time)); return date.toUTCString().slice(17, 22); } return String(time).slice(0, 5); }",
+    "generateTimeSlots": "function generateTimeSlots(startTimeStr = '08:00', endTimeStr = '18:00', interval = 35) { let timeSlots = []; let currentTime = new Date(`1970-01-01T${startTimeStr}:00`); const endTime = new Date(`1970-01-01T${endTimeStr}:00`); while (currentTime < endTime) { const slotStart = new Date(currentTime); currentTime.setMinutes(currentTime.getMinutes() + interval); const slotEnd = new Date(currentTime); timeSlots.push({ start: slotStart, end: slotEnd, label: `${formatTime(slotStart)} - ${formatTime(slotEnd)}` }); } return timeSlots; }",
+    "doesOverlap": "function doesOverlap(deployment, slot) { const deploymentStart = new Date(`1970-01-01T${deployment.startTime}:00`); let deploymentEnd = new Date(`1970-01-01T${deployment.endTime}:00`); if (deploymentEnd <= deploymentStart) { deploymentEnd.setDate(deploymentEnd.getDate() + 1); } return deploymentStart < slot.end && deploymentEnd > slot.start; }",
+    "formatTime": "function formatTime(date) { return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }); }"
+  },
+  "sampleProcessedData": {
+    "Mr. John Tan": [
+      {
+        "startTime": "08:00",
+        "endTime": "08:35",
+        "duty": "Canteen Duty"
+      },
+      {
+        "startTime": "09:10",
+        "endTime": "10:20",
+        "duty": "Relief Cover: 3-A Math"
+      }
+    ],
+    "Mrs. Emily Chen": [
+      {
+        "startTime": "08:00",
+        "endTime": "08:35",
+        "duty": "Parade Square"
+      },
+      {
+        "startTime": "08:00",
+        "endTime": "08:35",
+        "duty": "Staff Briefing"
+      }
+    ]
+  }
+}
