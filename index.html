@@ -207,18 +207,26 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
          */
         function parseCSV(csvText) {
             const lines = csvText.trim().split('\n');
-            if (lines.length < 2) return []; 
+            if (lines.length < 1) return []; // Allow just headers
             
             const headers = lines.shift().split(',').map(function(h) { return h.trim(); });
             
-            return lines.map(function(line) {
-                const values = line.split(',').map(function(v) { return v.trim(); });
-                let obj = {};
-                headers.forEach(function(header, index) {
-                    obj[header] = values[index] || ""; // Handle empty fields
-                });
-                return obj;
-            });
+            return lines
+                .map(function(line) {
+                    // Check for empty lines or lines with just commas
+                    const trimmedLine = line.trim();
+                    if (trimmedLine === '' || trimmedLine.replace(/,/g, '') === '') {
+                        return null; // Mark this line for removal
+                    }
+                    
+                    const values = line.split(',').map(function(v) { return v.trim(); });
+                    let obj = {};
+                    headers.forEach(function(header, index) {
+                        obj[header] = values[index] || ""; // Handle empty fields
+                    });
+                    return obj;
+                })
+                .filter(function(obj) { return obj !== null; }); // Filter out empty/invalid lines
         }
 
         /**
