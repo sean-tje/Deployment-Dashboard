@@ -25,6 +25,10 @@
             background-color: #f8fafc;
             font-weight: 600;
         }
+        /* Style for grouped class rows */
+        .group-row:not(:last-child) .table-cell {
+            border-bottom-style: dashed;
+        }
         .app-section {
             background-color: white;
             border-radius: 8px;
@@ -103,11 +107,10 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
                             Open Sheet
                         </a>
                     </div>
-                    <textarea id="classData" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" placeholder="ClassName,Programme,Day,TimeSlot
-1-1,Mathematics,Monday,09:00-10:00
-1-2,Mathematics,Monday,10:00-11:00
-3-1,Physics,Monday,09:00-10:00
-4-5,English,Friday,11:00-12:00"></textarea>
+                    <textarea id="classData" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" placeholder="ClassName,Programme,Day,TimeSlot,RequiredTeachers
+1-1,Mathematics,Monday,09:00-10:00,1
+1-2,Mathematics,Monday,10:00-11:00,2
+3-1,Physics,Monday,09:00-10:00,1"></textarea>
                 </div>
             </div>
             <button id="processButton" class="mt-4 w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
@@ -147,9 +150,28 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
             </div>
         </div>
 
-        <!-- Section 3: Individual View -->
+        <!-- Section 3: Teacher Load Report -->
         <div class="app-section">
-            <h2 class="text-xl font-semibold text-gray-700 mb-4">Step 3: View Individual Timetables</h2>
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">Step 3: Teacher Load Report</h2>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead id="load-report-head">
+                        <tr>
+                            <th class="table-header text-left">Teacher</th>
+                            <th class="table-header text-left">Total Classes</th>
+                            <th class="table-header text-left">Total Time (HH:MM)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="load-report-body" class="bg-white divide-y divide-gray-200">
+                        <tr><td class="p-4 text-center text-gray-500" colspan="3">Auto-assign data to see load report.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Section 4: Individual View -->
+        <div class="app-section">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">Step 4: View Individual Timetables</h2>
             <div class="flex flex-wrap items-center gap-4">
                 <label for="teacherSelect" class="text-sm font-medium text-gray-700">Select Teacher:</label>
                 <select id="teacherSelect" class="block w-full md:w-1/3 p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
@@ -178,7 +200,10 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
         // Global data stores
         let teachers = [];
         let classes = [];
-        let assignments = {}; // key: internal classKey, value: {name: TeacherName, type: 'auto'/'manual'}
+        // `assignments` stores the teacher assigned to a specific class *slot*
+        // key: unique key for class-slot (e.g., "1-1-Monday-09_00-10_00-0")
+        // value: {name: TeacherName, type: 'auto'/'manual'}
+        let assignments = {}; 
         let teacherOptionsHTML = '<option value="Unassigned">-- Unassigned --</option>';
 
         // DOM elements
@@ -189,6 +214,7 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
         const masterTableHead = document.getElementById('master-table-head');
         const masterTableBody = document.getElementById('master-table-body');
         const conflictsList = document.getElementById('conflicts-list');
+        const loadReportBody = document.getElementById('load-report-body');
         const teacherSelect = document.getElementById('teacherSelect');
         const individualTableHead = document.getElementById('individual-table-head');
         const individualTableBody = document.getElementById('individual-table-body');
@@ -201,6 +227,20 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
         teacherSelect.addEventListener('change', showIndividualSchedule);
         exportButton.addEventListener('click', exportAllSchedules);
         exportTableButton.addEventListener('click', exportDeploymentTable);
+
+        /**
+         * Creates a unique key for a class session.
+         */
+        function getClassKey(cls) {
+            return `${cls.ClassName}-${cls.Day}-${cls.TimeSlot.replace(/:/g, '_')}`;
+        }
+
+        /**
+         * Creates a unique key for a specific teacher slot within a class session.
+         */
+        function getSlotKey(cls, index) {
+            return `${getClassKey(cls)}-${index}`;
+        }
 
         /**
          * Parses CSV text into an array of objects.
@@ -268,6 +308,10 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
                 if (!c.Programme) {
                      errors.push(`Class Schedule (Row ${index + 1}): Missing Programme for ${c.ClassName}.`);
                 }
+
+                if (!c.RequiredTeachers || isNaN(parseInt(c.RequiredTeachers)) || parseInt(c.RequiredTeachers) < 1) {
+                    errors.push(`Class Schedule (Row ${index + 1}): Invalid 'RequiredTeachers' for ${c.ClassName}. Must be a number 1 or greater.`);
+                }
             });
 
             if (errors.length > 0) {
@@ -288,6 +332,7 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
             // 1. Clear all UI
             masterTableBody.innerHTML = `<tr><td class="p-4 text-center text-gray-500" colspan="6">Validate and process data to see deployment list.</td></tr>`;
             conflictsList.innerHTML = '<p class="text-gray-500">No conflicts detected.</p>';
+            loadReportBody.innerHTML = `<tr><td class="p-4 text-center text-gray-500" colspan="3">Auto-assign data to see load report.</td></tr>`;
             individualTableBody.innerHTML = `<tr><td class="p-4 text-center text-gray-500" colspan="4">Select a teacher to see their schedule.</td></tr>`;
             
             // 2. Process Teachers & Classes
@@ -313,7 +358,23 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
             populateMasterTable();
             populateTeacherSelect();
             runConflictCheck(); // Run check after auto-assign
+            updateLoadReport();
             showIndividualSchedule(); // Clear individual table
+        }
+
+        /**
+         * Calculates the current load (number of classes) for each teacher.
+         */
+        function getTeacherLoads(currentAssignments) {
+            const loads = {};
+            teachers.forEach(function(t) { loads[t.TeacherName] = 0; });
+            
+            Object.values(currentAssignments).forEach(function(assignment) {
+                if (assignment.name !== "Unassigned" && loads.hasOwnProperty(assignment.name)) {
+                    loads[assignment.name]++;
+                }
+            });
+            return loads;
         }
 
         /**
@@ -321,12 +382,7 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
          */
         function autoAssignClasses() {
             let newAssignments = {};
-            // Use an internal composite key for assignments
-            classes.forEach(function(c) {
-                const classKey = `${c.ClassName}-${c.Day}-${c.TimeSlot.replace(/:/g, '_')}`;
-                newAssignments[classKey] = { name: "Unassigned", type: "auto" };
-            });
-
+            
             // Sort classes to assign them in a predictable order
             const sortedClasses = classes.slice().sort(function(a, b) {
                 const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -336,22 +392,36 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
                 return a.TimeSlot.localeCompare(b.TimeSlot);
             });
 
-            // Loop through each class and find a suitable teacher
-            for (let i = 0; i < sortedClasses.length; i++) {
-                const classToAssign = sortedClasses[i];
-                // Find all teachers
-                const potentialTeachers = teachers; // No Programme filter needed
+            // Loop through each class and each required slot
+            sortedClasses.forEach(function(classToAssign) {
+                const required = parseInt(classToAssign.RequiredTeachers);
+                for (let i = 0; i < required; i++) {
+                    const slotKey = getSlotKey(classToAssign, i);
+                    
+                    // Get current teacher loads for fair assignment
+                    const teacherLoads = getTeacherLoads(newAssignments);
+                    
+                    // Sort potential teachers by their current load (fewest classes first)
+                    const potentialTeachers = teachers.slice().sort(function(a, b) {
+                        return teacherLoads[a.TeacherName] - teacherLoads[b.TeacherName];
+                    });
 
-                for (let j = 0; j < potentialTeachers.length; j++) {
-                    const teacher = potentialTeachers[j];
-                    // Check if this teacher is suitable for this class, given current assignments
-                    if (isTeacherSuitable(teacher, classToAssign, newAssignments)) {
-                        const classKey = `${classToAssign.ClassName}-${classToAssign.Day}-${classToAssign.TimeSlot.replace(/:/g, '_')}`;
-                        newAssignments[classKey] = { name: teacher.TeacherName, type: "auto" };
-                        break; // Assign the first suitable teacher and move to the next class
+                    // Find the first suitable teacher
+                    let assigned = false;
+                    for (let j = 0; j < potentialTeachers.length; j++) {
+                        const teacher = potentialTeachers[j];
+                        if (isTeacherSuitable(teacher, classToAssign, i, newAssignments)) {
+                            newAssignments[slotKey] = { name: teacher.TeacherName, type: "auto" };
+                            assigned = true;
+                            break; // Assign the first suitable (least-loaded) teacher
+                        }
+                    }
+                    
+                    if (!assigned) {
+                        newAssignments[slotKey] = { name: "Unassigned", type: "auto" };
                     }
                 }
-            }
+            });
             
             assignments = newAssignments;
         }
@@ -359,25 +429,39 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
         /**
          * Helper function to check if a teacher can be assigned a class
          */
-        function isTeacherSuitable(teacher, classToAssign, currentAssignments) {
+        function isTeacherSuitable(teacher, classToAssign, slotIndex, currentAssignments) {
             const rules = parseRestrictions(teacher.Restrictions);
             const classLevel = classToAssign.ClassName.split('-')[0];
             const classStartTime = classToAssign.TimeSlot.split('-')[0];
 
-            // 1. Check for Double Booking
+            // 1. Check for Double Booking (at the same time)
             for (const assignedSlotKey in currentAssignments) {
                 if (currentAssignments[assignedSlotKey].name === teacher.TeacherName) {
-                    // Find the class associated with this slotKey
                     const assignedClass = classes.find(function(c) {
-                        return `${c.ClassName}-${c.Day}-${c.TimeSlot.replace(/:/g, '_')}` === assignedSlotKey;
+                        // Check if assignedSlotKey belongs to this class
+                        const numSlots = parseInt(c.RequiredTeachers);
+                        for (let i=0; i<numSlots; i++) {
+                            if (getSlotKey(c, i) === assignedSlotKey) return true;
+                        }
+                        return false;
                     });
+                    
                     if (assignedClass && assignedClass.Day === classToAssign.Day && assignedClass.TimeSlot === classToAssign.TimeSlot) {
                         return false; // Double booked
                     }
                 }
             }
 
-            // 2. Check all restrictions
+            // 2. Check for Same-Class Assignment (can't be assigned to slot 0 AND slot 1)
+            const classKey = getClassKey(classToAssign);
+            for (let i = 0; i < slotIndex; i++) { // Check previous slots *for this class*
+                const prevSlotKey = `${classKey}-${i}`;
+                if (currentAssignments[prevSlotKey] && currentAssignments[prevSlotKey].name === teacher.TeacherName) {
+                    return false; // Already assigned to this class
+                }
+            }
+
+            // 3. Check all restrictions
             for (let i = 0; i < rules.length; i++) {
                 const rule = rules[i];
                 switch(rule.type) {
@@ -396,15 +480,11 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
                 }
             }
             
-            // 3. MAX_CLASSES check
+            // 4. MAX_CLASSES check
             const maxClassesRule = rules.find(function(r) { return r.type === 'MAX_CLASSES'; });
             if (maxClassesRule) {
-                let currentLoad = 0;
-                Object.values(currentAssignments).forEach(function(assignment) {
-                    if (assignment.name === teacher.TeacherName) {
-                        currentLoad++;
-                    }
-                });
+                const teacherLoads = getTeacherLoads(currentAssignments);
+                const currentLoad = teacherLoads[teacher.TeacherName] || 0;
                 if (currentLoad >= parseInt(maxClassesRule.value)) {
                     return false; // Already at max load
                 }
@@ -440,33 +520,43 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
             masterTableBody.innerHTML = ''; // Clear existing
 
             classes.forEach(function(cls) {
-                const classKey = `${cls.ClassName}-${cls.Day}-${cls.TimeSlot.replace(/:/g, '_')}`;
-                const row = document.createElement('tr');
-                row.id = `row-${classKey}`; // Use key for unique row ID
-                const assignedTeacher = assignments[classKey] ? assignments[classKey].name : "Unassigned";
-                const assignmentType = assignments[classKey] ? assignments[classKey].type : "auto";
+                const required = parseInt(cls.RequiredTeachers);
+                for (let i = 0; i < required; i++) {
+                    const slotKey = getSlotKey(cls, i);
+                    const row = document.createElement('tr');
+                    row.id = `row-${slotKey}`;
+                    row.className = "group-row"; // For styling
+                    
+                    const assignedTeacher = assignments[slotKey] ? assignments[slotKey].name : "Unassigned";
 
-                row.innerHTML = `
-                    <td class="table-cell">${cls.ClassName}</td>
-                    <td class="table-cell">${cls.Programme}</td>
-                    <td class="table-cell">${cls.Day}</td>
-                    <td class="table-cell">${cls.TimeSlot}</td>
-                    <td class="table-cell">
-                        <select class="w-full p-1 border border-gray-300 rounded-md" data-class-key="${classKey}" onchange="assignTeacher(event)">
-                            ${teacherOptionsHTML}
-                        </select>
-                    </td>
-                    <td class="table-cell">
-                        <span id="status-${classKey}"></span>
-                    </td>
-                `;
-                masterTableBody.appendChild(row);
-                
-                // Set the dropdown value
-                row.querySelector('select').value = assignedTeacher;
-                
-                // Set the initial status text
-                updateStatusText(classKey);
+                    // Only show class details on the first row of a group
+                    const classInfo = (i === 0) ? `<strong>${cls.ClassName}</strong>` : `&nbsp; <em>(Slot ${i + 1})</em>`;
+                    const programmeInfo = (i === 0) ? cls.Programme : "";
+                    const dayInfo = (i === 0) ? cls.Day : "";
+                    const timeInfo = (i === 0) ? cls.TimeSlot : "";
+
+                    row.innerHTML = `
+                        <td class="table-cell">${classInfo}</td>
+                        <td class="table-cell">${programmeInfo}</td>
+                        <td class="table-cell">${dayInfo}</td>
+                        <td class="table-cell">${timeInfo}</td>
+                        <td class="table-cell">
+                            <select class="w-full p-1 border border-gray-300 rounded-md" data-slot-key="${slotKey}" onchange="assignTeacher(event)">
+                                ${teacherOptionsHTML}
+                            </select>
+                        </td>
+                        <td class="table-cell">
+                            <span id="status-${slotKey}"></span>
+                        </td>
+                    `;
+                    masterTableBody.appendChild(row);
+                    
+                    // Set the dropdown value
+                    row.querySelector('select').value = assignedTeacher;
+                    
+                    // Set the initial status text
+                    updateStatusText(slotKey);
+                }
             });
         }
 
@@ -485,23 +575,24 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
          */
         function assignTeacher(event) {
             const teacherName = event.target.value;
-            const classKey = event.target.dataset.classKey; // Use class-key
+            const slotKey = event.target.dataset.slotKey;
             
             // Update global assignment state and mark as 'manual'
-            assignments[classKey] = { name: teacherName, type: "manual" };
+            assignments[slotKey] = { name: teacherName, type: "manual" };
             
             runConflictCheck();
+            updateLoadReport();
             showIndividualSchedule(); // Update individual view
         }
         
         /**
          * Updates the status text and color for a row.
          */
-         function updateStatusText(classKey) {
-            const statusEl = document.getElementById(`status-${classKey}`);
+         function updateStatusText(slotKey) {
+            const statusEl = document.getElementById(`status-${slotKey}`);
             if (!statusEl) return;
 
-            const assignment = assignments[classKey];
+            const assignment = assignments[slotKey];
             if (!assignment || assignment.name === "Unassigned") {
                 statusEl.textContent = "Unassigned";
                 statusEl.className = "status-unassigned";
@@ -509,7 +600,7 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
             }
             
             // Check for conflicts related to this specific row
-            const conflicts = checkRowForConflicts(classKey);
+            const conflicts = checkRowForConflicts(slotKey);
             
             if (conflicts.length > 0) {
                 statusEl.textContent = "Conflict!";
@@ -538,20 +629,32 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
         }
 
         /**
+         * Finds the class object associated with a given slotKey.
+         */
+        function getClassFromSlotKey(slotKey) {
+            // "1-1-Monday-09_00-10_00-0"
+            const parts = slotKey.split('-');
+            const index = parts.pop();
+            const classKey = parts.join('-');
+            
+            return classes.find(function(c) {
+                return getClassKey(c) === classKey;
+            });
+        }
+
+        /**
          * Checks a specific row/assignment for conflicts.
          */
-        function checkRowForConflicts(classKey) {
+        function checkRowForConflicts(slotKey) {
             let conflicts = [];
-            const assignment = assignments[classKey];
+            const assignment = assignments[slotKey];
             if (!assignment || assignment.name === "Unassigned") {
                 return conflicts;
             }
 
             const teacherName = assignment.name;
             const teacher = teachers.find(function(t) { return t.TeacherName === teacherName; });
-            const classToAssign = classes.find(function(c) {
-                return `${c.ClassName}-${c.Day}-${c.TimeSlot.replace(/:/g, '_')}` === classKey;
-            });
+            const classToAssign = getClassFromSlotKey(slotKey);
 
             if (!teacher || !classToAssign) return conflicts;
 
@@ -560,20 +663,28 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
             const classStartTime = classToAssign.TimeSlot.split('-')[0];
 
             // 1. Double Booking Check
-            Object.keys(assignments).forEach(function(otherClassKey) {
-                if (classKey === otherClassKey) return; // Don't check against self
-                const otherAssignment = assignments[otherClassKey];
+            Object.keys(assignments).forEach(function(otherSlotKey) {
+                if (slotKey === otherSlotKey) return; // Don't check against self
+                const otherAssignment = assignments[otherSlotKey];
                 if (otherAssignment.name === teacherName) {
-                    const otherClass = classes.find(function(c) {
-                        return `${c.ClassName}-${c.Day}-${c.TimeSlot.replace(/:/g, '_')}` === otherClassKey;
-                    });
+                    const otherClass = getClassFromSlotKey(otherSlotKey);
                     if (otherClass && otherClass.Day === classToAssign.Day && otherClass.TimeSlot === classToAssign.TimeSlot) {
                         conflicts.push(`<b>Double Booking:</b> ${teacherName} is also assigned to ${otherClass.ClassName} at this time.`);
                     }
                 }
             });
+
+            // 2. Same-Class Assignment Check
+            const classKey = getClassKey(classToAssign);
+            for (let i = 0; i < parseInt(classToAssign.RequiredTeachers); i++) {
+                const otherSlotKey = `${classKey}-${i}`;
+                if (slotKey !== otherSlotKey && assignments[otherSlotKey] && assignments[otherSlotKey].name === teacherName) {
+                    conflicts.push(`<b>Double Assignment:</b> ${teacherName} is already assigned to another slot for this same class.`);
+                    break; // Only need to report this once
+                }
+            }
             
-            // 2. Advanced Restriction Checks
+            // 3. Advanced Restriction Checks
             rules.forEach(function(rule) {
                 switch(rule.type) {
                     case 'DAY_NOT':
@@ -614,8 +725,6 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
             // Pre-count assignments for MAX_CLASSES check
             Object.values(assignments).forEach(function(assignment) {
                 if (assignment.name !== "Unassigned") {
-                    // This might throw an error if assignment.name is not in teacherAssignmentCounts
-                    // Let's add a check
                     if (teacherAssignmentCounts.hasOwnProperty(assignment.name)) {
                         teacherAssignmentCounts[assignment.name]++;
                     }
@@ -623,8 +732,8 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
             });
 
             // Check each row for conflicts
-            Object.keys(assignments).forEach(function(classKey) {
-                const conflicts = checkRowForConflicts(classKey);
+            Object.keys(assignments).forEach(function(slotKey) {
+                const conflicts = checkRowForConflicts(slotKey);
                 conflicts.forEach(function(conflict) {
                     conflictsFound++;
                     if (typeof conflict === 'string') {
@@ -635,7 +744,7 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
                 });
                 
                 // After checking conflicts, update the row's status
-                updateStatusText(classKey);
+                updateStatusText(slotKey);
             });
             
             // 4. MAX_CLASSES Check (done after all other checks)
@@ -671,6 +780,82 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
         }
 
         /**
+         * Calculates the duration of a time slot in minutes.
+         * e.g., "09:00-10:30" -> 90
+         */
+        function getDurationInMinutes(timeSlot) {
+            try {
+                const parts = timeSlot.split('-');
+                const startTime = parts[0].split(':');
+                const endTime = parts[1].split(':');
+                
+                const startMinutes = parseInt(startTime[0]) * 60 + parseInt(startTime[1]);
+                const endMinutes = parseInt(endTime[0]) * 60 + parseInt(endTime[1]);
+                
+                return endMinutes - startMinutes;
+            } catch (e) {
+                console.error("Error parsing timeslot:", timeSlot, e);
+                return 0;
+            }
+        }
+
+        /**
+         * Formats total minutes into "HH:MM" string.
+         */
+        function formatMinutesToHM(minutes) {
+            if (minutes === 0) return "00:00";
+            const h = Math.floor(minutes / 60);
+            const m = minutes % 60;
+            const hStr = h < 10 ? '0' + h : '' + h;
+            const mStr = m < 10 ? '0' + m : '' + m;
+            return `${hStr}:${mStr}`;
+        }
+
+        /**
+         * Updates the Teacher Load Report table.
+         */
+        function updateLoadReport() {
+            const loads = {};
+            teachers.forEach(function(t) {
+                loads[t.TeacherName] = { classes: 0, minutes: 0 };
+            });
+
+            Object.keys(assignments).forEach(function(slotKey) {
+                const assignment = assignments[slotKey];
+                if (assignment.name !== "Unassigned" && loads.hasOwnProperty(assignment.name)) {
+                    const cls = getClassFromSlotKey(slotKey);
+                    if (cls) {
+                        loads[assignment.name].classes++;
+                        loads[assignment.name].minutes += getDurationInMinutes(cls.TimeSlot);
+                    }
+                }
+            });
+
+            loadReportBody.innerHTML = ''; // Clear existing
+            
+            if (teachers.length === 0) {
+                loadReportBody.innerHTML = `<tr><td class="p-4 text-center text-gray-500" colspan="3">No teacher data.</td></tr>`;
+                return;
+            }
+
+            // Sort teachers alphabetically
+            const sortedTeachers = teachers.slice().sort(function(a, b) {
+                return a.TeacherName.localeCompare(b.TeacherName);
+            });
+
+            sortedTeachers.forEach(function(teacher) {
+                const load = loads[teacher.TeacherName];
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="table-cell">${teacher.TeacherName}</td>
+                    <td class="table-cell">${load.classes}</td>
+                    <td class="table-cell">${formatMinutesToHM(load.minutes)}</td>
+                `;
+                loadReportBody.appendChild(row);
+            });
+        }
+
+        /**
          * Displays the selected teacher's schedule.
          */
         function showIndividualSchedule() {
@@ -691,9 +876,15 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
                 return;
             }
 
-            const teacherClasses = classes.filter(function(cls) {
-                const classKey = `${cls.ClassName}-${cls.Day}-${cls.TimeSlot.replace(/:/g, '_')}`;
-                return assignments[classKey] && assignments[classKey].name === selectedTeacher;
+            let teacherClasses = [];
+            Object.keys(assignments).forEach(function(slotKey) {
+                const assignment = assignments[slotKey];
+                if (assignment.name === selectedTeacher) {
+                    const cls = getClassFromSlotKey(slotKey);
+                    if (cls) {
+                        teacherClasses.push(cls);
+                    }
+                }
             });
 
             if (teacherClasses.length === 0) {
@@ -769,9 +960,15 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
             });
 
             sortedTeachers.forEach(function(teacher) {
-                const teacherClasses = classes.filter(function(cls) {
-                    const classKey = `${cls.ClassName}-${cls.Day}-${cls.TimeSlot.replace(/:/g, '_')}`;
-                    return assignments[classKey] && assignments[classKey].name === teacher.TeacherName;
+                let teacherClasses = [];
+                Object.keys(assignments).forEach(function(slotKey) {
+                    const assignment = assignments[slotKey];
+                    if (assignment.name === teacher.TeacherName) {
+                        const cls = getClassFromSlotKey(slotKey);
+                        if (cls) {
+                            teacherClasses.push(cls);
+                        }
+                    }
                 });
 
                 if (teacherClasses.length > 0) {
@@ -807,7 +1004,7 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
             
             let exportData = [];
             // Add Header Row
-            exportData.push("Class Name\tProgramme\tDay\tTime\tAssigned Teacher\tStatus");
+            exportData.push("Class Name\tSlot\tProgramme\tDay\tTime\tAssigned Teacher\tStatus");
 
             // Sort classes by day and time
             const sortedClasses = classes.slice().sort(function(a, b) {
@@ -819,17 +1016,19 @@ Mr. Cho,LEVEL_ONLY:3"></textarea>
             });
 
             sortedClasses.forEach(function(cls) {
-                const classKey = `${cls.ClassName}-${cls.Day}-${cls.TimeSlot.replace(/:/g, '_')}`;
-                const assignment = assignments[classKey];
-                const teacherName = (assignment && assignment.name !== "Unassigned") ? assignment.name : "";
-                
-                // Get the text from the status span
-                const statusEl = document.getElementById(`status-${classKey}`);
-                const statusText = statusEl ? statusEl.textContent : "Unassigned";
+                const required = parseInt(cls.RequiredTeachers);
+                for (let i = 0; i < required; i++) {
+                    const slotKey = getSlotKey(cls, i);
+                    const assignment = assignments[slotKey];
+                    const teacherName = (assignment && assignment.name !== "Unassigned") ? assignment.name : "";
+                    
+                    const statusEl = document.getElementById(`status-${slotKey}`);
+                    const statusText = statusEl ? statusEl.textContent : "Unassigned";
 
-                exportData.push(
-                    `${cls.ClassName}\t${cls.Programme}\t${cls.Day}\t${cls.TimeSlot}\t${teacherName}\t${statusText}`
-                );
+                    exportData.push(
+                        `${cls.ClassName}\t${i+1}\t${cls.Programme}\t${cls.Day}\t${cls.TimeSlot}\t${teacherName}\t${statusText}`
+                    );
+                }
             });
 
             const tsvString = exportData.join('\n');
